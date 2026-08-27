@@ -1,1 +1,417 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Геймерская бункер-студия</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+        }
+        #controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+            border: 1px solid #4a90e2;
+        }
+        #controls h3 {
+            margin: 0 0 10px 0;
+            font-size: 16px;
+            color: #ffffff;
+        }
+        button {
+            display: block;
+            width: 100%;
+            margin: 5px 0;
+            padding: 8px 12px;
+            border: none;
+            border-radius: 4px;
+            background: #4a90e2;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #357abd;
+        }
+        button.active {
+            background: #2ecc71;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    <div id="controls">
+        <h3>Видимость стен</h3>
+        <button id="all-walls" class="active">Все 4 стены</button>
+        <button id="back-wall">Только задняя стена</button>
+        <button id="floor-only">Только пол</button>
+    </div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script>
+        // Инициализация сцены
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a2e); // Темный геймерский фон
+
+        // Изометрическая камера
+        const aspect = window.innerWidth / window.innerHeight;
+        const d = 10;
+        const camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 1, 1000);
+        camera.position.set(15, 15, 15);
+        camera.lookAt(0, 0, 0);
+
+        // Рендерер
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        // Управление камерой
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.screenSpacePanning = true;
+        controls.minZoom = 0.5;
+        controls.maxZoom = 2;
+
+        // Освещение
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
+        directionalLight.position.set(10, 20, 10);
+        directionalLight.castShadow = true;
+        directionalLight.shadow.camera.left = -20;
+        directionalLight.shadow.camera.right = 20;
+        directionalLight.shadow.camera.top = 20;
+        directionalLight.shadow.camera.bottom = -20;
+        scene.add(directionalLight);
+
+        // Неоновое RGB освещение для геймерской атмосферы
+        const rgbLight1 = new THREE.PointLight(0x9b59b6, 0.8, 20); // Фиолетовый
+        rgbLight1.position.set(-4, 5, -4);
+        scene.add(rgbLight1);
+
+        const rgbLight2 = new THREE.PointLight(0x00ffff, 0.6, 20); // Голубой
+        rgbLight2.position.set(4, 5, 4);
+        scene.add(rgbLight2);
+
+        // Материалы (обновлены под темный бункер)
+        const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x2c3e50, roughness: 0.8 });
+        const wallMaterial = new THREE.MeshStandardMaterial({ color: 0x34495e, roughness: 0.9 });
+        const furnitureMaterial = new THREE.MeshStandardMaterial({ color: 0x1c2833 });
+        const bedMaterial = new THREE.MeshStandardMaterial({ color: 0xe74c3c }); // Красное одеяло
+        const deskMaterial = new THREE.MeshStandardMaterial({ color: 0x2c3e50 });
+        const computerMaterial = new THREE.MeshStandardMaterial({ color: 0x000000 });
+        const screenMaterial = new THREE.MeshStandardMaterial({ color: 0x00ff00, emissive: 0x00ff00, emissiveIntensity: 0.5 }); // Зеленый экран
+        const beanBagMaterial = new THREE.MeshStandardMaterial({ color: 0xf1c40f, roughness: 1.0 }); // Желтое кресло-мешок
+
+        // Пол
+        const floor = new THREE.Mesh(
+            new THREE.BoxGeometry(12, 0.2, 12),
+            floorMaterial
+        );
+        floor.position.y = -0.1;
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        // Стены
+        const walls = [];
+        
+        const backWall = new THREE.Mesh(new THREE.BoxGeometry(12, 6, 0.2), wallMaterial);
+        backWall.position.set(0, 3, -6);
+        backWall.receiveShadow = true;
+        walls.push(backWall);
+        scene.add(backWall);
+
+        const leftWall = new THREE.Mesh(new THREE.BoxGeometry(0.2, 6, 12), wallMaterial);
+        leftWall.position.set(-6, 3, 0);
+        leftWall.receiveShadow = true;
+        walls.push(leftWall);
+        scene.add(leftWall);
+
+        const rightWall = new THREE.Mesh(new THREE.BoxGeometry(0.2, 6, 12), wallMaterial);
+        rightWall.position.set(6, 3, 0);
+        rightWall.receiveShadow = true;
+        walls.push(rightWall);
+        scene.add(rightWall);
+
+        const frontWall = new THREE.Mesh(new THREE.BoxGeometry(12, 6, 0.2), wallMaterial);
+        frontWall.position.set(0, 3, 6);
+        frontWall.receiveShadow = true;
+        walls.push(frontWall);
+        scene.add(frontWall);
+
+        // Кровать
+        const bedBase = new THREE.Mesh(new THREE.BoxGeometry(3, 0.3, 4), furnitureMaterial);
+        bedBase.position.set(-3, 0.15, -3);
+        bedBase.castShadow = true;
+        bedBase.receiveShadow = true;
+        scene.add(bedBase);
+
+        const mattress = new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.4, 3.8), bedMaterial);
+        mattress.position.set(-3, 0.5, -3);
+        mattress.castShadow = true;
+        scene.add(mattress);
+
+        const pillow = new THREE.Mesh(
+            new THREE.BoxGeometry(1.5, 0.3, 0.8),
+            new THREE.MeshStandardMaterial({ color: 0x2c3e50 })
+        );
+        pillow.position.set(-3, 0.85, -4.5);
+        pillow.castShadow = true;
+        scene.add(pillow);
+
+        // Письменный стол
+        const deskTop = new THREE.Mesh(new THREE.BoxGeometry(3, 0.2, 1.5), deskMaterial);
+        deskTop.position.set(3, 2, -4);
+        deskTop.castShadow = true;
+        deskTop.receiveShadow = true;
+        scene.add(deskTop);
+
+        // Ножки стола
+        for (let i = 0; i < 4; i++) {
+            const leg = new THREE.Mesh(new THREE.BoxGeometry(0.2, 2, 0.2), furnitureMaterial);
+            const x = i % 2 === 0 ? 1.7 : 4.3;
+            const z = i < 2 ? -4.6 : -3.4;
+            leg.position.set(x, 1, z);
+            leg.castShadow = true;
+            scene.add(leg);
+        }
+
+        // Компьютер (Монитор)
+        const monitor = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.2, 0.1), computerMaterial);
+        monitor.position.set(3, 3.2, -4.2);
+        monitor.castShadow = true;
+        scene.add(monitor);
+
+        const screen = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1, 0.05), screenMaterial);
+        screen.position.set(3, 3.2, -4.15);
+        scene.add(screen);
+
+        const monitorStand = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.6, 0.3), computerMaterial);
+        monitorStand.position.set(3, 2.4, -4.2);
+        monitorStand.castShadow = true;
+        scene.add(monitorStand);
+
+        // Клавиатура
+        const keyboard = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.05, 0.4), computerMaterial);
+        keyboard.position.set(3, 2.15, -3.8);
+        keyboard.castShadow = true;
+        scene.add(keyboard);
+
+        // Геймерское кресло (вместо обычного)
+        const chairSeat = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.1, 1.1), new THREE.MeshStandardMaterial({color: 0xe74c3c}));
+        chairSeat.position.set(3, 1.2, -2.5);
+        chairSeat.castShadow = true;
+        scene.add(chairSeat);
+
+        const chairBack = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.6, 0.1), new THREE.MeshStandardMaterial({color: 0xe74c3c}));
+        chairBack.position.set(3, 2.1, -2);
+        chairBack.castShadow = true;
+        scene.add(chairBack);
+
+        for (let i = 0; i < 4; i++) {
+            const leg = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.2, 0.1), computerMaterial);
+            const x = i % 2 === 0 ? 2.6 : 3.4;
+            const z = i < 2 ? -2.9 : -2.1;
+            leg.position.set(x, 0.6, z);
+            leg.castShadow = true;
+            scene.add(leg);
+        }
+
+        // Шкаф
+        const wardrobe = new THREE.Mesh(new THREE.BoxGeometry(2, 4, 1), furnitureMaterial);
+        wardrobe.position.set(-5, 2, 4);
+        wardrobe.castShadow = true;
+        wardrobe.receiveShadow = true;
+        scene.add(wardrobe);
+
+        // Полки на стене
+        for (let i = 0; i < 3; i++) {
+            const shelf = new THREE.Mesh(new THREE.BoxGeometry(2, 0.1, 0.5), furnitureMaterial);
+            shelf.position.set(4, 2 + i * 1.2, -5.8);
+            shelf.castShadow = true;
+            shelf.receiveShadow = true;
+            scene.add(shelf);
+
+            // Книги/Игры на полках
+            for (let j = 0; j < 5; j++) {
+                const book = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.15, 0.4, 0.3),
+                    new THREE.MeshStandardMaterial({ 
+                        color: new THREE.Color().setHSL(Math.random(), 0.8, 0.5) 
+                    })
+                );
+                book.position.set(3.2 + j * 0.3, 2.25 + i * 1.2, -5.8);
+                book.castShadow = true;
+                scene.add(book);
+            }
+        }
+
+        // Геймерские плакаты на стенах (обновленные)
+        const posterColors = [0xff0055, 0x00ffaa, 0x5500ff, 0xffaa00];
+        const posterPositions = [
+            { pos: [-3, 3.5, -5.9], rot: [0, 0, 0] },       // Задняя стена
+            { pos: [-5.9, 3.5, -2], rot: [0, Math.PI / 2, 0] }, // Левая стена
+            { pos: [5.9, 3.5, 2], rot: [0, -Math.PI / 2, 0] },  // Правая стена
+            { pos: [2, 3.5, 5.9], rot: [0, Math.PI, 0] }        // Передняя стена
+        ];
+
+        for (let i = 0; i < 4; i++) {
+            const poster = new THREE.Mesh(
+                new THREE.BoxGeometry(1.8, 2.5, 0.05),
+                new THREE.MeshStandardMaterial({ 
+                    color: posterColors[i], 
+                    emissive: posterColors[i], 
+                    emissiveIntensity: 0.2 
+                })
+            );
+            poster.position.set(...posterPositions[i].pos);
+            poster.rotation.set(...posterPositions[i].rot);
+            poster.castShadow = true;
+            scene.add(poster);
+        }
+
+        // Ковер
+        const carpet = new THREE.Mesh(
+            new THREE.BoxGeometry(4, 0.05, 3),
+            new THREE.MeshStandardMaterial({ color: 0x2c3e50 })
+        );
+        carpet.position.set(0, 0.025, 0);
+        carpet.receiveShadow = true;
+        scene.add(carpet);
+
+        // Лампа на столе
+        const lampBase = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.1, 16), computerMaterial);
+        lampBase.position.set(4.2, 2.15, -4.2);
+        lampBase.castShadow = true;
+        scene.add(lampBase);
+
+        const lampArm = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1, 8), computerMaterial);
+        lampArm.position.set(4.2, 2.7, -4.2);
+        lampArm.castShadow = true;
+        scene.add(lampArm);
+
+        const lampShade = new THREE.Mesh(
+            new THREE.ConeGeometry(0.3, 0.4, 16),
+            new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 0.4 })
+        );
+        lampShade.position.set(4.2, 3.2, -4.2);
+        lampShade.rotation.x = Math.PI;
+        lampShade.castShadow = true;
+        scene.add(lampShade);
+
+        // ==========================================
+        // НОВЫЕ ЭЛЕМЕНТЫ: Кресло-мешок и Вентилятор
+        // ==========================================
+
+        // Кресло-мешок (сплюснутая сфера)
+        const beanBag = new THREE.Mesh(
+            new THREE.SphereGeometry(1, 16, 16),
+            beanBagMaterial
+        );
+        beanBag.position.set(4, 0.6, 4);
+        beanBag.scale.set(1.2, 0.6, 1.2); // Делаем его приземистым и мягким на вид
+        beanBag.castShadow = true;
+        beanBag.receiveShadow = true;
+        scene.add(beanBag);
+
+        // Потолочный вентилятор
+        const fanGroup = new THREE.Group();
+        fanGroup.position.set(0, 5.8, 0); // Под самым потолком
+
+        // Центральная часть вентилятора
+        const fanHub = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.3, 0.3, 0.2, 16),
+            new THREE.MeshStandardMaterial({ color: 0xecf0f1 })
+        );
+        fanGroup.add(fanHub);
+
+        // Лопасти вентилятора (группа для анимации вращения)
+        const fanBladesGroup = new THREE.Group();
+        for (let i = 0; i < 3; i++) {
+            const blade = new THREE.Mesh(
+                new THREE.BoxGeometry(2.2, 0.05, 0.3),
+                new THREE.MeshStandardMaterial({ color: 0x95a5a6 })
+            );
+            blade.position.set(1.1, 0, 0); // Сдвигаем относительно центра вращения
+            
+            const bladePivot = new THREE.Group();
+            bladePivot.add(blade);
+            bladePivot.rotation.y = (i * Math.PI * 2) / 3; // Равномерно распределяем 3 лопасти
+            fanBladesGroup.add(bladePivot);
+        }
+        fanGroup.add(fanBladesGroup);
+        scene.add(fanGroup);
+
+        // Управление видимостью стен
+        const allWallsBtn = document.getElementById('all-walls');
+        const backWallBtn = document.getElementById('back-wall');
+        const floorOnlyBtn = document.getElementById('floor-only');
+
+        function setActiveButton(activeBtn) {
+            [allWallsBtn, backWallBtn, floorOnlyBtn].forEach(btn => btn.classList.remove('active'));
+            activeBtn.classList.add('active');
+        }
+
+        allWallsBtn.addEventListener('click', () => {
+            walls.forEach(wall => wall.visible = true);
+            floor.visible = true;
+            setActiveButton(allWallsBtn);
+        });
+
+        backWallBtn.addEventListener('click', () => {
+            walls.forEach((wall, index) => {
+                wall.visible = index === 0; // Только задняя стена
+            });
+            floor.visible = true;
+            setActiveButton(backWallBtn);
+        });
+
+        floorOnlyBtn.addEventListener('click', () => {
+            walls.forEach(wall => wall.visible = false);
+            floor.visible = true;
+            setActiveButton(floorOnlyBtn);
+        });
+
+        // Анимация
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            
+            // Плавная анимация вращения вентилятора
+            fanBladesGroup.rotation.y += 0.08;
+            
+            renderer.render(scene, camera);
+        }
+
+        // Обработка изменения размера окна (исправленный фрагмент)
+        window.addEventListener('resize', () => {
+            const aspect = window.innerWidth / window.innerHeight;
+            camera.left = -d * aspect;
+            camera.right = d * aspect;
+            camera.top = d;
+            camera.bottom = -d;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
