@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>База Арес - Марс с роботом</title>
+<style>
+body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', monospace; }
+canvas { display: block; }
+
+#ui {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    color: #ff4444;
+    font-size: 14px;
+    background: rgba(0,0,0,0.85);
+    padding: 20px;
+    border: 2px solid #ff4444;
+    border-radius: 5px;
+    box-shadow: 0 0 20px rgba(255,0,0,0.3);
+    z-index: 100;
+    min-width: 320px;
+}
+
+#ui .title {
+    color: #ff6644;
+    font-size: 20px;
+    font-weight: bold;
+    margin-bottom: 10px;
+    text-shadow: 0 0 10px #ff4444;
+    letter-spacing: 2px;
+}
+
+#stage { color: #00ffff; font-size: 16px; margin: 10px 0; text-shadow: 0 0 5px #00ffff; }
+#hint { color: #888; font-size: 12px; font-style: italic; }
+
+#robot-msg {
+    position: absolute;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.9);
+    color: #00ff88;
+    padding: 12px 20px;
+    border: 2px solid #00ff88;
+    border-radius: 20px;
+    font-size: 16px;
+    display: none;
+    z-index: 150;
+    box-shadow: 0 0 15px rgba(0,255,136,0.5);
+    font-weight: bold;
+}
+
+#tooltip {
+    position: absolute;
+    background: rgba(0,0,0,0.9);
+    color: #00ffff;
+    padding: 8px 12px;
+    border: 1px solid #00ffff;
+    border-radius: 3px;
+    display: none;
+    pointer-events: none;
+    z-index: 200;
+    font-size: 13px;
+    box-shadow: 0 0 10px rgba(0,255,255,0.3);
+}
+
+#loading {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    color: #ff4444;
+    font-size: 24px;
+    text-align: center;
+    z-index: 300;
+}
+.spinner {
+    width: 60px; height: 60px;
+    border: 4px solid #333;
+    border-top: 4px solid #ff4444;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 20px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div id="loading"><div class="spinner"></div><div>Инициализация базы "Арес"...</div></div>
+
+<div id="ui" style="display:none;">
+    <div class="title">⚠ БАЗА "АРЕС" - МАРС</div>
+    <div id="stage">Этап 1: Найдите инопланетное растение</div>
+    <div id="hint">Осмотрите оранжерею</div>
+</div>
+
+<div id="robot-msg"></div>
+<div id="tooltip"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// СЦЕНА
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a0505);
+scene.fog = new THREE.FogExp2(0x2a0a0a, 0.03);
+
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
+camera.position.set(0, 4, 12);
+camera.lookAt(0, 1, -2);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+// ОСВЕЩЕНИЕ
+const ambientLight = new THREE.AmbientLight(0x221111, 0.4);
+scene.add(ambientLight);
+
+const mainLight = new THREE.DirectionalLight(0xff4422, 0.8);
+mainLight.position.set(5, 8, 5);
+mainLight.castShadow = true;
+mainLight.shadow.mapSize.set(2048, 2048);
+scene.add(mainLight);
+
+const emergencyLights = [];
+[[-4, 4, -3], [4, 4, -3], [0, 5, -5]].forEach(pos => {
+    const light = new THREE.PointLight(0xff0000, 0, 10);
+    light.position.set(...pos);
+    scene.add(light);
+    emergencyLights.push({ light, phase: Math.random() * Math.PI * 2 });
+    const housing = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.2, 0.25, 0.4, 8),
+        new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.9 })
+    );
+    housing.position.set(...pos);
+    scene.add(housing);
+});
+
+// ПОЛ
+const floorCanvas = document.createElement('canvas');
+floorCanvas.width = 512; floorCanvas.height = 512;
+const floorCtx = floorCanvas.getContext('2d');
+floorCtx.fillStyle = '#3a1a0a';
+floorCtx.fillRect(0, 0, 512, 512);
+for (let i = 0; i < 512; i += 64) {
+    floorCtx.strokeStyle = '#4a2a1a'; floorCtx.lineWidth = 2;
+    floorCtx.beginPath(); floorCtx.moveTo(i, 0); floorCtx.lineTo(i, 512); floorCtx.stroke();
+    floorCtx.beginPath(); floorCtx.moveTo(0, i); floorCtx.lineTo(512, i); floorCtx.stroke();
+}
+for (let i = 0; i < 300; i++) {
+    floorCtx.fillStyle = `rgba(${80+Math.random()*40}, ${30+Math.random()*20}, ${10+Math.random()*10}, ${Math.random()*0.4})`;
+    floorCtx.beginPath(); floorCtx.arc(Math.random()*512, Math.random()*512, Math.random()*20, 0, Math.PI*2); floorCtx.fill();
+}
+const floorTexture = new THREE.CanvasTexture(floorCanvas);
+floorTexture.wrapS = floorTexture.wrapT = THREE.RepeatWrapping;
+floorTexture.repeat.set(4, 4);
+const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(25, 25),
+    new THREE.MeshStandardMaterial({ map: floorTexture, roughness: 0.9, metalness: 0.1 })
+);
+floor.rotation.x = -Math.PI / 2;
+floor.receiveShadow = true;
+scene.add(floor);
+
+// СТЕНЫ
+const wallMat = new THREE.MeshStandardMaterial({ color: 0x2a1a1a, roughness: 0.8, metalness: 0.4 });
+const backWall = new THREE.Mesh(new THREE.BoxGeometry(25, 7, 0.5), wallMat);
+backWall.position.set(0, 3.5, -6);
+backWall.receiveShadow = true;
+scene.add(backWall);
+
+// ОКНО с видом на Марс
+const windowFrame = new THREE.Mesh(
+    new THREE.BoxGeometry(6, 3, 0.3),
+    new THREE.MeshStandardMaterial({ color: 0x1a1a1a, metalness: 0.9 })
+);
+windowFrame.position.set(0, 3.5, -5.8);
+scene.add(windowFrame);
+const windowGlass = new THREE.Mesh(
+    new THREE.PlaneGeometry(5.5, 2.5),
+    new THREE.MeshPhysicalMaterial({ color: 0xff6644, transparent: true, opacity: 0.3, roughness: 0.1 })
+);
+windowGlass.position.set(0, 3.5, -5.7);
+scene.add(windowGlass);
+
+const canyonMat = new THREE.MeshStandardMaterial({ color: 0x8b4513, roughness: 0.9 });
+for (let i = 0; i < 5; i++) {
+    const rock = new THREE.Mesh(new THREE.ConeGeometry(1+Math.random(), 2+Math.random()*2, 6), canyonMat);
+    rock.position.set(-6+i*3, 1, -15);
+    scene.add(rock);
+}
+
+// ТРУБЫ
+const pipeMat = new THREE.MeshStandardMaterial({ color: 0x4a3a3a, metalness: 0.7, roughness: 0.4 });
+for (let i = 0; i < 4; i++) {
+    const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 20, 12), pipeMat);
+    pipe.rotation.z = Math.PI / 2;
+    pipe.position.set(0, 5.5, -4+i*2);
+    pipe.castShadow = true;
+    scene.add(pipe);
+}
+
+// ==================== ИГРОВЫЕ ОБЪЕКТЫ ====================
+let gameState = 0;
+let doorCanClick = false;
+let robotClickCount = 0;
+
+// 1. РАСТЕНИЕ-ЩУПАЛЬЦА
+const alienPlant = new THREE.Group();
+const plantBase = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.3, 0.4, 0.5, 12),
+    new THREE.MeshStandardMaterial({ color: 0x2a1a0a, roughness: 0.9 })
+);
+plantBase.position.y = 0.25;
+alienPlant.add(plantBase);
+const tentacles = [];
+for (let i = 0; i < 8; i++) {
+    const angle = (i/8)*Math.PI*2;
+    const tentacle = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.05, 0.08, 1.2, 8),
+        new THREE.MeshStandardMaterial({ color: 0xff0044, emissive: 0xff0044, emissiveIntensity: 0.4 })
+    );
+    tentacle.position.set(Math.cos(angle)*0.2, 0.8, Math.sin(angle)*0.2);
+    tentacle.rotation.z = Math.cos(angle)*0.3;
+    tentacle.rotation.x = Math.sin(angle)*0.3;
+    tentacle.castShadow = true;
+    alienPlant.add(tentacle);
+    tentacles.push(tentacle);
+}
+alienPlant.position.set(-4, 0, -3);
+alienPlant.name = 'plant';
+scene.add(alienPlant);
+
+// 2. ФЛАКОН
+const vial = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.1, 0.1, 0.35, 12),
+    new THREE.MeshStandardMaterial({ color: 0xff0044, emissive: 0xff0044, emissiveIntensity: 0.6, transparent: true, opacity: 0.8 })
+);
+vial.position.set(-4, 2, -3);
+vial.visible = false;
+vial.name = 'vial';
+scene.add(vial);
+
+// 3. МЕХАНИЧЕСКИЙ ПОРТ
+const portGroup = new THREE.Group();
+const portBase = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.5, 0.6, 0.4, 16),
+    new THREE.MeshStandardMaterial({ color: 0x3a3a3a, metalness: 0.9, roughness: 0.3 })
+);
+portBase.position.y = 0.2;
+portGroup.add(portBase);
+const portTop = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.4, 0.5, 0.3, 16),
+    new THREE.MeshStandardMaterial({ color: 0x0088ff, metalness: 0.8, emissive: 0x0044aa, emissiveIntensity: 0.3 })
+);
+portTop.position.y = 0.55;
+portGroup.add(portTop);
+for (let i = 0; i < 4; i++) {
+    const angle = (i/4)*Math.PI*2;
+    const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.8, 8), new THREE.MeshStandardMaterial({ color: 0x555555, metalness: 0.9 }));
+    pipe.position.set(Math.cos(angle)*0.5, 0.4, Math.sin(angle)*0.5);
+    pipe.rotation.z = Math.PI/2; pipe.rotation.y = angle;
+    portGroup.add(pipe);
+    const valve = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.04, 8, 16), new THREE.MeshStandardMaterial({ color: 0xff4444, metalness: 0.8 }));
+    valve.position.set(Math.cos(angle)*0.9, 0.4, Math.sin(angle)*0.9);
+    valve.rotation.y = angle;
+    portGroup.add(valve);
+}
+portGroup.position.set(0, 0, -3);
+portGroup.name = 'port';
+scene.add(portGroup);
+
+// 4. КОСМИЧЕСКИЙ ШЛЮЗ
+const airlockGroup = new THREE.Group();
+const airlockFrame = new THREE.Mesh(
+    new THREE.BoxGeometry(2.5, 3.5, 0.3),
+    new THREE.MeshStandardMaterial({ color: 0x2a2a2a, metalness: 0.9, roughness: 0.4 })
+);
+airlockFrame.position.y = 1.75;
+airlockGroup.add(airlockFrame);
+const airlockDoor = new THREE.Mesh(
+    new THREE.BoxGeometry(2, 3, 0.4),
+    new THREE.MeshStandardMaterial({ color: 0x6a6a6a, metalness: 0.95, roughness: 0.2 })
+);
+airlockDoor.position.set(0, 1.6, 0.15);
+airlockDoor.castShadow = true;
+airlockGroup.add(airlockDoor);
+const indicators = [];
+for (let i = 0; i < 3; i++) {
+    const ind = new THREE.Mesh(
+        new THREE.SphereGeometry(0.08, 12, 12),
+        new THREE.MeshStandardMaterial({ color: i===0?0xff0000:0x00ff00, emissive: i===0?0xff0000:0x00ff00, emissiveIntensity: 0.5 })
+    );
+    ind.position.set(-0.7, 2.5-i*0.3, 0.35);
+    airlockGroup.add(ind);
+    indicators.push(ind);
+}
+const controlPanel = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.8, 0.1), new THREE.MeshStandardMaterial({ color: 0x1a1a1a, metalness: 0.8 }));
+controlPanel.position.set(0.7, 1.5, 0.35);
+airlockGroup.add(controlPanel);
+for (let i = 0; i < 4; i++) {
+    const btn = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.05, 0.05, 0.05, 12),
+        new THREE.MeshStandardMaterial({ color: i<2?0x00ffff:0xff4444, emissive: i<2?0x00ffff:0xff4444, emissiveIntensity: 0.5 })
+    );
+    btn.rotation.x = Math.PI/2;
+    btn.position.set(0.7, 1.7-i*0.15, 0.4);
+    airlockGroup.add(btn);
+}
+airlockGroup.position.set(4, 0, -5);
+airlockGroup.name = 'airlock';
+scene.add(airlockGroup);
+
+const bioPanel = new THREE.Mesh(
+    new THREE.BoxGeometry(0.5, 0.7, 0.05),
+    new THREE.MeshStandardMaterial({ color: 0x001122, emissive: 0x00ffff, emissiveIntensity: 0 })
+);
+bioPanel.position.set(4, 1.5, -4.6);
+bioPanel.visible = false;
+bioPanel.name = 'panel';
+scene.add(bioPanel);
+
+// ==================== 🤖 РОБОТ-ПОМОЩНИК ====================
+const robot = new THREE.Group();
+
+// Корпус (цилиндр)
+const robotBody = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.35, 0.4, 0.6, 16),
+    new THREE.MeshStandardMaterial({ color: 0xe8e8e8, metalness: 0.6, roughness: 0.3 })
+);
+robotBody.position.y = 0.5;
+robotBody.castShadow = true;
+robot.add(robotBody);
+
+// Верхняя часть (голова)
+const robotHead = new THREE.Mesh(
+    new THREE.SphereGeometry(0.3, 16, 16),
+    new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.7, roughness: 0.3 })
+);
+robotHead.position.y = 1;
+robotHead.castShadow = true;
+robot.add(robotHead);
+
+// Экран-лицо (светящийся)
+const robotFace = new THREE.Mesh(
+    new THREE.CircleGeometry(0.22, 16),
+    new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0x00aaff, emissiveIntensity: 0.8 })
+);
+robotFace.position.set(0, 1, 0.28);
+robot.add(robotFace);
+
+// Глаза (два кружка на экране)
+const eyeMat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
+const leftEye = new THREE.Mesh(new THREE.CircleGeometry(0.05, 12), eyeMat);
+leftEye.position.set(-0.08, 1.05, 0.29);
+robot.add(leftEye);
+const rightEye = new THREE.Mesh(new THREE.CircleGeometry(0.05, 12), eyeMat);
+rightEye.position.set(0.08, 1.05, 0.29);
+robot.add(rightEye);
+
+// Рот (полоска)
+const mouth = new THREE.Mesh(
+    new THREE.BoxGeometry(0.12, 0.02, 0.01),
+    new THREE.MeshBasicMaterial({ color: 0x00ffff })
+);
+mouth.position.set(0, 0.92, 0.29);
+robot.add(mouth);
+
+// Антенна
+const antenna = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.02, 0.02, 0.3, 8),
+    new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.9 })
+);
+antenna.position.set(0, 1.35, 0);
+robot.add(antenna);
+const antennaBall = new THREE.Mesh(
+    new THREE.SphereGeometry(0.06, 12, 12),
+    new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xff0000, emissiveIntensity: 0.8 })
+);
+antennaBall.position.set(0, 1.5, 0);
+robot.add(antennaBall);
+
+// Колёса (3 штуки)
+const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8 });
+const wheels = [];
+for (let i = 0; i < 3; i++) {
+    const angle = (i/3)*Math.PI*2;
+    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.1, 16), wheelMat);
+    wheel.position.set(Math.cos(angle)*0.35, 0.15, Math.sin(angle)*0.35);
+    wheel.rotation.z = Math.PI/2;
+    wheel.rotation.y = angle;
+    robot.add(wheel);
+    wheels.push(wheel);
+}
+
+// Манипулятор (рука)
+const arm = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.04, 0.04, 0.4, 8),
+    new THREE.MeshStandardMaterial({ color: 0xaaaaaa, metalness: 0.8 })
+);
+arm.position.set(0.3, 0.6, 0);
+arm.rotation.z = -Math.PI/4;
+robot.add(arm);
+const claw = new THREE.Mesh(
+    new THREE.SphereGeometry(0.08, 8, 8),
+    new THREE.MeshStandardMaterial({ color: 0xff4444, emissive: 0xff4444, emissiveIntensity: 0.4 })
+);
+claw.position.set(0.45, 0.75, 0);
+robot.add(claw);
+
+// Огоньки по корпусу
+const robotLights = [];
+for (let i = 0; i < 4; i++) {
+    const angle = (i/4)*Math.PI*2;
+    const light = new THREE.Mesh(
+        new THREE.SphereGeometry(0.04, 8, 8),
+        new THREE.MeshStandardMaterial({ color: 0x00ff00, emissive: 0x00ff00, emissiveIntensity: 0.6 })
+    );
+    light.position.set(Math.cos(angle)*0.38, 0.5, Math.sin(angle)*0.38);
+    robot.add(light);
+    robotLights.push(light);
+}
+
+robot.position.set(2, 0, 2);
+robot.name = 'robot';
+scene.add(robot);
+
+// Маршрут робота (waypoints)
+const robotPath = [
+    new THREE.Vector3(2, 0, 2),
+    new THREE.Vector3(-2, 0, 1),
+    new THREE.Vector3(-2, 0, -1),
+    new THREE.Vector3(2, 0, -1),
+    new THREE.Vector3(2, 0, 2)
+];
+let currentWaypoint = 0;
+let robotState = 'patrol'; // patrol, happy, going-to-target
+let robotTarget = null;
+let robotHappyTimer = 0;
+
+// Частицы сердечек от робота
+const heartParticles = [];
+const heartGroup = new THREE.Group();
+scene.add(heartGroup);
+
+function spawnHearts(pos) {
+    for (let i = 0; i < 15; i++) {
+        const heart = new THREE.Mesh(
+            new THREE.SphereGeometry(0.08, 8, 8),
+            new THREE.MeshBasicMaterial({ 
+                color: new THREE.Color().setHSL(Math.random()*0.2 + 0.9, 1, 0.6),
+                transparent: true, opacity: 1
+            })
+        );
+        heart.position.copy(pos);
+        heart.position.y += 1;
+        heart.userData = {
+            vel: new THREE.Vector3((Math.random()-0.5)*0.05, Math.random()*0.08+0.03, (Math.random()-0.5)*0.05),
+            life: 1
+        };
+        heartParticles.push(heart);
+        heartGroup.add(heart);
+    }
+}
+
+// ==================== ЧАСТИЦЫ ПЫЛИ И ГАЗА ====================
+const dustCount = 400;
+const dustGeo = new THREE.BufferGeometry();
+const dustPos = new Float32Array(dustCount*3);
+const dustVel = [];
+for (let i = 0; i < dustCount; i++) {
+    dustPos[i*3] = (Math.random()-0.5)*20;
+    dustPos[i*3+1] = Math.random()*5;
+    dustPos[i*3+2] = (Math.random()-0.5)*15-2;
+    dustVel.push({ x:(Math.random()-0.5)*0.008, y:(Math.random()-0.5)*0.005, z:(Math.random()-0.5)*0.008 });
+}
+dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
+const dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({ color: 0xff8866, size: 0.04, transparent: true, opacity: 0.5 }));
+scene.add(dust);
+
+const gasCount = 150;
+const gasGeo = new THREE.BufferGeometry();
+const gasPos = new Float32Array(gasCount*3);
+for (let i = 0; i < gasCount; i++) {
+    gasPos[i*3] = 4+(Math.random()-0.5)*2;
+    gasPos[i*3+1] = Math.random()*3;
+    gasPos[i*3+2] = -5+(Math.random()-0.5)*2;
+}
+gasGeo.setAttribute('position', new THREE.BufferAttribute(gasPos, 3));
+const gasMat = new THREE.PointsMaterial({ color: 0x00ff44, size: 0.12, transparent: true, opacity: 0 });
+const gas = new THREE.Points(gasGeo, gasMat);
+scene.add(gas);
+
+// ==================== UI И RAYCASTER ====================
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+let hovered = null;
+
+const stageText = document.getElementById('stage');
+const hintText = document.getElementById('hint');
+const tooltip = document.getElementById('tooltip');
+const robotMsg = document.getElementById('robot-msg');
+
+const stages = [
+    { text: 'Этап 1: Найдите инопланетное растение', hint: 'Кликните на светящееся растение слева' },
+    { text: 'Этап 2: Образец получен!', hint: 'Кликните на механический порт в центре' },
+    { text: 'Этап 3: Активация протокола...', hint: 'Подождите появления зелёного газа' },
+    { text: 'Этап 4: Шлюз готов! Кликните на дверь', hint: 'Кликните на космический шлюз справа' },
+    { text: 'Этап 5: ШЛЮЗ ОТКРЫТ! ', hint: 'Миссия выполнена!' }
+];
+
+function showRobotMsg(text, duration = 2000) {
+    robotMsg.textContent = '🤖 ' + text;
+    robotMsg.style.display = 'block';
+    setTimeout(() => { robotMsg.style.display = 'none'; }, duration);
+}
+
+window.addEventListener('mousemove', (e) => {
+    mouse.x = (e.clientX/window.innerWidth)*2-1;
+    mouse.y = -(e.clientY/window.innerHeight)*2+1;
+    tooltip.style.left = (e.clientX+15)+'px';
+    tooltip.style.top = (e.clientY+15)+'px';
+});
+
+window.addEventListener('click', () => {
+    if (!hovered) return;
+
+    // РОБОТ - особая логика
+    if (hovered.name === 'robot') {
+        robotClickCount++;
+        if (robotState === 'patrol') {
+            // Первое поглаживание
+            robotState = 'happy';
+            robotHappyTimer = 0;
+            showRobotMsg('Бип-бип! *радуется* ❤️', 2500);
+            spawnHearts(robot.position);
+            // Меняем цвет глаз на розовый
+            leftEye.material.color.setHex(0xff69b4);
+            rightEye.material.color.setHex(0xff69b4);
+            leftEye.material.emissive = new THREE.Color(0xff69b4);
+            rightEye.material.emissive = new THREE.Color(0xff69b4);
+        } else if (robotState === 'happy') {
+            // Второе - даём команду
+            robotState = 'going-to-target';
+            // Выбираем цель в зависимости от этапа
+            if (gameState <= 1) robotTarget = portGroup.position.clone();
+            else robotTarget = airlockGroup.position.clone();
+            showRobotMsg('Команда принята! Двигаюсь к цели ', 2500);
+            leftEye.material.color.setHex(0x00ff00);
+            rightEye.material.color.setHex(0x00ff00);
+            leftEye.material.emissive = new THREE.Color(0x00ff00);
+            rightEye.material.emissive = new THREE.Color(0x00ff00);
+        }
+        createEffect(hovered.position);
+        return;
+    }
+
+    if (hovered.name === 'plant' && gameState === 0) {
+        tentacles.forEach(t => { t.material.emissiveIntensity = 0; t.material.color.setHex(0x440022); });
+        vial.visible = true;
+        gameState = 1;
+        stageText.textContent = stages[1].text;
+        hintText.textContent = stages[1].hint;
+        showRobotMsg('Обнаружен биологический образец! ', 2500);
+        createEffect(alienPlant.position);
+    }
+    else if (hovered.name === 'port' && gameState === 1) {
+        vial.visible = false;
+        gameState = 2;
+        stageText.textContent = stages[2].text;
+        hintText.textContent = stages[2].hint;
+        showRobotMsg('Протокол "Коррозия" активирован ⚗️', 2500);
+        createEffect(portGroup.position);
+        indicators.forEach(ind => { ind.material.emissiveIntensity = 1; });
+        setTimeout(() => {
+            gasMat.opacity = 0.5;
+            gameState = 3;
+            doorCanClick = true;
+            stageText.textContent = stages[3].text;
+            hintText.textContent = stages[3].hint;
+            showRobotMsg('Дверь готова к открытию! ', 2500);
+        }, 2500);
+    }
+    else if (hovered.name === 'airlock' && doorCanClick) {
+        gameState = 4;
+        doorCanClick = false;
+        stageText.textContent = stages[4].text;
+        hintText.textContent = stages[4].hint;
+        showRobotMsg('Миссия выполнена! Отличная работа, командир! 🏆', 4000);
+        createEffect(airlockGroup.position);
+        bioPanel.visible = true;
+        bioPanel.material.emissiveIntensity = 1;
+        airlockDoor.material.color.setHex(0x8b4513);
+        airlockDoor.material.roughness = 0.9;
+        mainLight.color.setHex(0x0088ff);
+        ambientLight.color.setHex(0x002244);
+        emergencyLights.forEach(el => el.light.color.setHex(0x00aaff));
+    }
+});
+
+function createEffect(pos) {
+    const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.3, 0.4, 24),
+        new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 1, side: THREE.DoubleSide })
+    );
+    ring.position.copy(pos);
+    ring.position.y += 1;
+    ring.rotation.x = -Math.PI/2;
+    scene.add(ring);
+    let s = 1, o = 1;
+    function anim() {
+        s += 0.08; o -= 0.04;
+        ring.scale.set(s,s,s);
+        ring.material.opacity = o;
+        if (o > 0) requestAnimationFrame(anim);
+        else scene.remove(ring);
+    }
+    anim();
+}
+
+// ==================== АНИМАЦИЯ ====================
+let time = 0;
+function animate() {
+    requestAnimationFrame(animate);
+    time += 0.016;
+
+    // Растение
+    if (gameState === 0) {
+        tentacles.forEach((t, i) => {
+            const angle = (i/8)*Math.PI*2;
+            t.rotation.z = Math.cos(angle)*0.3 + Math.sin(time*2+i)*0.1;
+            t.rotation.x = Math.sin(angle)*0.3 + Math.cos(time*2+i)*0.1;
+            t.material.emissiveIntensity = 0.3 + Math.sin(time*3+i)*0.2;
+        });
+    }
+
+    // Лампы
+    emergencyLights.forEach(el => {
+        const flash = Math.sin(time*3+el.phase);
+        el.light.intensity = flash > 0.5 ? 2 : 0.2;
+    });
+
+    // Пыль
+    const dPos = dustGeo.attributes.position.array;
+    for (let i = 0; i < dustCount; i++) {
+        dPos[i*3] += dustVel[i].x;
+        dPos[i*3+1] += dustVel[i].y;
+        dPos[i*3+2] += dustVel[i].z;
+        if (Math.abs(dPos[i*3]) > 10) dustVel[i].x *= -1;
+        if (dPos[i*3+1] > 5 || dPos[i*3+1] < 0) dustVel[i].y *= -1;
+        if (Math.abs(dPos[i*3+2]+2) > 8) dustVel[i].z *= -1;
+    }
+    dustGeo.attributes.position.needsUpdate = true;
+
+    // АНТЕННА робота покачивается
+    antenna.rotation.z = Math.sin(time*4)*0.2;
+    antennaBall.material.emissiveIntensity = 0.5 + Math.sin(time*5)*0.3;
+
+    // Огоньки робота мигают
+    robotLights.forEach((l, i) => {
+        l.material.emissiveIntensity = 0.4 + Math.sin(time*4+i)*0.3;
+    });
+
+    // Движение робота
+    if (robotState === 'patrol') {
+        const target = robotPath[currentWaypoint];
+        const dir = new THREE.Vector3().subVectors(target, robot.position);
+        dir.y = 0;
+        const dist = dir.length();
+        if (dist < 0.2) {
+            currentWaypoint = (currentWaypoint + 1) % robotPath.length;
+        } else {
+            dir.normalize();
+            robot.position.add(dir.multiplyScalar(0.02));
+            robot.rotation.y = Math.atan2(dir.x, dir.z);
+        }
+        // Колёса крутятся
+        wheels.forEach(w => { w.rotation.x += 0.15; });
+    }
+    else if (robotState === 'happy') {
+        robotHappyTimer += 0.016;
+        // Крутится от радости
+        robot.rotation.y += 0.15;
+        // Подпрыгивает
+        robot.position.y = Math.abs(Math.sin(robotHappyTimer*8))*0.2;
+        if (robotHappyTimer > 2.5) {
+            robotState = 'patrol';
+            robot.position.y = 0;
+        }
+    }
+    else if (robotState === 'going-to-target' && robotTarget) {
+        const dir = new THREE.Vector3().subVectors(robotTarget, robot.position);
+        dir.y = 0;
+        const dist = dir.length();
+        if (dist < 0.3) {
+            robotState = 'patrol';
+            showRobotMsg('Цель достигнута! ✅', 2000);
+            leftEye.material.color.setHex(0x00aaff);
+            rightEye.material.color.setHex(0x00aaff);
+            leftEye.material.emissive = new THREE.Color(0x00aaff);
+            rightEye.material.emissive = new THREE.Color(0x00aaff);
+        } else {
+            dir.normalize();
+            robot.position.add(dir.multiplyScalar(0.03));
+            robot.rotation.y = Math.atan2(dir.x, dir.z);
+            wheels.forEach(w => { w.rotation.x += 0.2; });
+        }
+    }
+
+    // Сердечки-частицы
+    for (let i = heartParticles.length-1; i >= 0; i--) {
+        const h = heartParticles[i];
+        h.position.add(h.userData.vel);
+        h.userData.vel.y -= 0.001;
+        h.userData.life -= 0.015;
+        h.material.opacity = h.userData.life;
+        h.scale.setScalar(h.userData.life);
+        if (h.userData.life <= 0) {
+            heartGroup.remove(h);
+            heartParticles.splice(i, 1);
+        }
+    }
+
+    // Raycaster
+    raycaster.setFromCamera(mouse, camera);
+    const interactives = [alienPlant, vial, portGroup, airlockGroup, robot];
+    const intersects = raycaster.intersectObjects(interactives, true);
+    
+    if (hovered) {
+        if (hovered.material && hovered.material.emissiveIntensity !== undefined) {
+            hovered.material.emissiveIntensity = hovered.userData.origEmissive || 0;
+        }
+        hovered = null;
+        document.body.style.cursor = 'default';
+        tooltip.style.display = 'none';
+    }
+    
+    if (intersects.length > 0) {
+        let obj = intersects[0].object;
+        while (obj.parent && !interactives.includes(obj)) obj = obj.parent;
+        
+        if (interactives.includes(obj) && obj.visible) {
+            hovered = obj;
+            document.body.style.cursor = 'pointer';
+            const names = { 
+                plant: '🌱 Инопланетное растение', 
+                port: '⚙️ Механический порт', 
+                airlock: '🚪 Космический шлюз', 
+                vial: '🧪 Флакон с образцом',
+                robot: '🤖 Робот АРЕС-7 (кликни 2 раза!)'
+            };
+            tooltip.textContent = names[obj.name] || obj.name;
+            tooltip.style.display = 'block';
+            if (obj.material && obj.material.emissiveIntensity !== undefined) {
+                obj.userData.origEmissive = obj.material.emissiveIntensity || 0;
+                obj.material.emissiveIntensity = 0.8;
+            }
+        }
+    }
+
+    renderer.render(scene, camera);
+}
+
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+document.getElementById('loading').style.display = 'none';
+document.getElementById('ui').style.display = 'block';
+animate();
+</script>
+</body>
+</html>
